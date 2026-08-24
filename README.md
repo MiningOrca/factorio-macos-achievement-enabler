@@ -1,6 +1,6 @@
 # Factorio macOS Achievement Enabler
 
-Enables Steam achievements in modded Factorio on MacBooks with ARM (Apple Silicon).
+Enable Steam achievements with mods in Factorio 2.0/2.1 on macOS Apple Silicon (ARM64).
 
 The patch modifies only achievement-related mod checks and makes modded games use the normal `achievements.dat` instead of `achievements-modded.dat`. It does **not** disable mod detection globally.
 
