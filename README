@@ -1,0 +1,92 @@
+# Factorio macOS Achievement Enabler
+
+Enables Steam achievements in modded Factorio on Apple Silicon Macs.
+
+The script patches only the achievement-related mod checks in the ARM64 game executable. It does not disable mod detection globally.
+
+It also makes modded games use the normal local achievement file (`achievements.dat`) instead of `achievements-modded.dat`.
+
+No mod loader or Python installation required.
+
+## Requirements
+
+- Factorio for macOS
+- Apple Silicon (ARM64)
+- Steam version
+- A supported game build
+
+The patch is build-specific. The script verifies the expected ARM64 instruction bytes before modifying the executable and refuses to patch an unknown build.
+
+## Usage
+
+Download the script and make it executable:
+
+```bash
+chmod +x factorio-achievement-enabler-patch.sh
+```
+
+Check current state:
+
+```bash
+./factorio-achievement-enabler-patch.sh status
+```
+
+Enable achievements with mods:
+
+```bash
+./factorio-achievement-enabler-patch.sh on
+```
+
+Disable the patch:
+
+```bash
+./factorio-achievement-enabler-patch.sh off
+```
+
+Restore the full original executable:
+
+```bash
+./factorio-achievement-enabler-patch.sh restore
+```
+
+Factorio must be closed before applying, removing, or restoring the patch.
+
+## What it does
+
+Factorio normally separates modded local achievement state and blocks several Steam achievement/stat paths when disqualifying mods are active.
+
+This script patches only the relevant ARM64 code paths:
+
+- `SteamContext::setStat()`
+- `SteamContext::unlockAchievement()`
+- `SteamContext::unlockAchievementsThatAreOnSteamButArentActivatedLocally()`
+- `SteamContext::updateAchievementStatsFromSteam()`
+- `PlayerData::PlayerData()`
+
+The first four patches bypass the mod-dependent early exits in Steam achievement/stat handling. The `PlayerData` patch selects `achievements.dat` instead of `achievements-modded.dat` for local achievement state.
+
+The script creates a checksum-verified backup of the original executable before the first modification and re-signs the patched executable with an ad-hoc signature.
+
+`off` restores the original five instructions. `restore` copies back the complete first-run backup, restoring the original executable as a whole.
+
+## Updating Factorio
+
+Game updates may change the executable and invalidate the patch locations or instruction bytes.
+
+If the expected bytes do not match, the script reports an unknown build and refuses to modify the executable.
+
+After a Factorio update, the patch locations must be re-verified before adding support for the new build.
+
+## Uninstall
+
+Run:
+
+```bash
+./factorio-achievement-enabler-patch.sh restore
+```
+
+or verify the game files through Steam.
+
+## License
+
+MIT
