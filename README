@@ -1,91 +1,172 @@
 # Factorio macOS Achievement Enabler
 
-Enables Steam achievements in modded Factorio on Apple Silicon Macs.
+Enables Steam achievements in modded Factorio on MacBooks with ARM (Apple Silicon).
 
-The script patches only the achievement-related mod checks in the ARM64 game executable. It does not disable mod detection globally.
-
-It also makes modded games use the normal local achievement file (`achievements.dat`) instead of `achievements-modded.dat`.
-
-No mod loader or Python installation required.
+The patch modifies only achievement-related mod checks and makes modded games use the normal `achievements.dat` instead of `achievements-modded.dat`. It does **not** disable mod detection globally.
 
 ## Requirements
 
-- Factorio for macOS
-- Apple Silicon (ARM64)
-- Steam version
-- A supported game build
+* Factorio for macOS
+* Apple Silicon (ARM64)
+* Steam version
 
-The patch is build-specific. The script verifies the expected ARM64 instruction bytes before modifying the executable and refuses to patch an unknown build.
+Factorio is expected at the default Steam location:
+
+```text
+~/Library/Application Support/Steam/steamapps/common/Factorio/factorio.app
+```
 
 ## Usage
 
-Download the script and make it executable:
+Download `factorio-achievements-patch.sh` and make it executable:
 
 ```bash
-chmod +x factorio-achievement-enabler-patch.sh
+chmod +x factorio-achievements-patch.sh
 ```
 
-Check current state:
+Quit Factorio before enabling, disabling, or restoring the patch.
+
+### Enable
 
 ```bash
-./factorio-achievement-enabler-patch.sh status
+./factorio-achievements-patch.sh on
 ```
 
-Enable achievements with mods:
+The original executable is backed up automatically.
+
+### Check status
 
 ```bash
-./factorio-achievement-enabler-patch.sh on
+./factorio-achievements-patch.sh status
 ```
 
-Disable the patch:
+Example:
+
+```text
+Factorio: /Users/.../Factorio/factorio.app/Contents/MacOS/factorio
+Locations: symbols
+
+SteamContext::setStat                                      bytes: 20010054
+SteamContext::unlockAchievement                            bytes: 20010054
+unlockAchievementsThatAreOnSteamButArentActivatedLocally   bytes: a0030054
+SteamContext::updateAchievementStatsFromSteam              bytes: 20010054
+PlayerData::PlayerData                                     bytes: 02000014
+
+Patch: OFF
+```
+
+### Disable
 
 ```bash
-./factorio-achievement-enabler-patch.sh off
+./factorio-achievements-patch.sh off
 ```
 
-Restore the full original executable:
+Restores the original five instructions while keeping the backup.
+
+### Restore original executable
 
 ```bash
-./factorio-achievement-enabler-patch.sh restore
+./factorio-achievements-patch.sh restore
 ```
 
-Factorio must be closed before applying, removing, or restoring the patch.
+Restores the complete original executable from the backup.
 
-## What it does
+## Compatibility
 
-Factorio normally separates modded local achievement state and blocks several Steam achievement/stat paths when disqualifying mods are active.
+Verified with Factorio **2.0** and **2.1** ARM64 builds.
 
-This script patches only the relevant ARM64 code paths:
+The script normally finds the required functions from their ARM64 symbols and calculates the patch locations relative to them instead of relying on fixed executable addresses.
 
-- `SteamContext::setStat()`
-- `SteamContext::unlockAchievement()`
-- `SteamContext::unlockAchievementsThatAreOnSteamButArentActivatedLocally()`
-- `SteamContext::updateAchievementStatsFromSteam()`
-- `PlayerData::PlayerData()`
+Because of this, newer Factorio versions may continue to work without changes to the script.
 
-The first four patches bypass the mod-dependent early exits in Steam achievement/stat handling. The `PlayerData` patch selects `achievements.dat` instead of `achievements-modded.dat` for local achievement state.
+Before modifying anything, the script verifies that every patch location contains exactly the expected original or already-patched instruction. If a game update changes the relevant code, the script refuses to modify the executable.
 
-The script creates a checksum-verified backup of the original executable before the first modification and re-signs the patched executable with an ad-hoc signature.
+If symbols are unavailable, verified fallback addresses are included for Factorio 2.0 and 2.1.
 
-`off` restores the original five instructions. `restore` copies back the complete first-run backup, restoring the original executable as a whole.
+## What It Patches
 
-## Updating Factorio
+Five achievement-related code paths are modified:
 
-Game updates may change the executable and invalidate the patch locations or instruction bytes.
+```text
+SteamContext::setStat
+SteamContext::unlockAchievement
+unlockAchievementsThatAreOnSteamButArentActivatedLocally
+SteamContext::updateAchievementStatsFromSteam
+PlayerData::PlayerData
+```
 
-If the expected bytes do not match, the script reports an unknown build and refuses to modify the executable.
+The first four bypass mod-dependent checks that prevent Steam achievement and statistic operations.
 
-After a Factorio update, the patch locations must be re-verified before adding support for the new build.
+The relevant conditional branches are changed from:
 
-## Uninstall
+```asm
+b.eq target
+```
 
-Run:
+to unconditional branches to the same target:
+
+```asm
+b target
+```
+
+The `PlayerData::PlayerData()` patch makes modded games use:
+
+```text
+achievements.dat
+```
+
+instead of:
+
+```text
+achievements-modded.dat
+```
+
+## Game Updates
+
+After updating Factorio, run:
 
 ```bash
-./factorio-achievement-enabler-patch.sh restore
+./factorio-achievements-patch.sh status
 ```
 
-or verify the game files through Steam.
+If the relevant code has not changed, the script should continue to work normally.
+
+If it reports:
+
+```text
+Patch: UNKNOWN BUILD / BYTES
+Refusing to modify this binary until the patch is re-verified.
+```
+
+do not try to force the old patch.
+
+Please open a GitHub issue and include:
+
+* your Factorio version;
+* the full output of the `status` command.
+
+The new build can then be checked and support added if necessary.
+
+## Backup and Recovery
+
+The first successful `on` creates:
+
+```text
+factorio.original
+factorio.original.sha256
+```
+
+next to the patch script.
+
+The backup checksum is verified before it is used.
+
+To restore the saved original executable:
+
+```bash
+./factorio-achievements-patch.sh restore
+```
+
+Steam's **Verify integrity of game files** can also restore the official executable.
 
 ## License
 
