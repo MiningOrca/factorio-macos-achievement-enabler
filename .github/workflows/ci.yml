@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    uses: MiningOrca/release-workflows/.github/workflows/macos-achievement-release.yml@main
+    uses: MiningOrca/macos-achivements-release-workflows/.github/workflows/macos-achievement-release.yml@main
     with:
       script_path: factorio-achievements-patch.sh
       asset_name: factorio-achievements-patch.sh
