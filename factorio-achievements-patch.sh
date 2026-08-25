@@ -76,6 +76,21 @@ TEXT_VMADDR=0
 TEXT_FILEOFF=0
 TEXT_FILESIZE=0
 
+# Human-visible command output goes through these two functions.
+# A terminal banner can later be integrated here without touching patch logic.
+ui_print() {
+  printf '%s\n' "$*"
+}
+
+ui_error() {
+  printf '%s\n' "$*" >&2
+}
+
+die() {
+  ui_error "ERROR: $*"
+  exit 1
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -90,11 +105,6 @@ Commands:
   off      Disable the patch and restore the original five instructions.
   restore  Restore the full original executable from the first-run backup.
 USAGE
-}
-
-die() {
-  echo "ERROR: $*" >&2
-  exit 1
 }
 
 require_tools() {
@@ -116,6 +126,7 @@ ensure_not_running() {
   fi
 }
 
+# Data-returning helpers intentionally write directly to stdout.
 backup_sha() {
   shasum -a 256 "$1" | awk '{print $1}'
 }
@@ -176,7 +187,7 @@ init_macho_layout() {
 vm_to_fileoff() {
   local vm="$1"
   (( vm >= TEXT_VMADDR && vm < TEXT_VMADDR + TEXT_FILESIZE )) || return 1
-  echo $((SLICE_OFF + TEXT_FILEOFF + vm - TEXT_VMADDR))
+  printf '%s\n' $((SLICE_OFF + TEXT_FILEOFF + vm - TEXT_VMADDR))
 }
 
 read4() {
@@ -211,7 +222,7 @@ symbol_vm() {
   hex="$(printf '%s\n' "$matches" | awk 'NR == 1 { print $1 }')"
   [[ "$hex" =~ ^[0-9a-fA-F]+$ ]] || return 1
 
-  echo $((16#$hex))
+  printf '%s\n' $((16#$hex))
 }
 
 resolve_vms_from_symbols() {
@@ -316,38 +327,51 @@ global_state() {
   done
 
   if (( unknown_count > 0 )); then
-    echo "UNKNOWN"
+    printf '%s\n' "UNKNOWN"
   elif (( stock_count == ${#PATCH_STATES[@]} )); then
-    echo "OFF"
+    printf '%s\n' "OFF"
   elif (( patched_count == ${#PATCH_STATES[@]} )); then
-    echo "ON"
+    printf '%s\n' "ON"
   else
-    echo "MIXED"
+    printf '%s\n' "MIXED"
   fi
 }
 
+run_logged() {
+  local output
+
+  if output="$("$@" 2>&1)"; then
+    [[ -z "$output" ]] || ui_print "$output"
+    return 0
+  fi
+
+  [[ -z "$output" ]] || ui_error "$output"
+  return 1
+}
+
 show_status_resolved() {
-  local i state
+  local i state line
   state="$(global_state)"
 
-  echo "Factorio: $BIN"
-  echo "Locations: $LOCATION_SOURCE"
-  echo
+  ui_print "Factorio: $BIN"
+  ui_print "Locations: $LOCATION_SOURCE"
+  ui_print ""
 
   for ((i = 0; i < ${#PATCH_NAMES[@]}; i++)); do
-    printf '%-58s bytes: %s\n' \
-  "${PATCH_NAMES[i]}" \
-  "${PATCH_CURRENTS[i]}"
+    printf -v line '%-58s bytes: %s' \
+      "${PATCH_NAMES[i]}" \
+      "${PATCH_CURRENTS[i]}"
+    ui_print "$line"
   done
 
-  echo
+  ui_print ""
   case "$state" in
-    ON)    echo "Patch: ON" ;;
-    OFF)   echo "Patch: OFF" ;;
-    MIXED) echo "Patch: MIXED (known bytes, but only part of the patch is applied)" ;;
+    ON)    ui_print "Patch: ON" ;;
+    OFF)   ui_print "Patch: OFF" ;;
+    MIXED) ui_print "Patch: MIXED (known bytes, but only part of the patch is applied)" ;;
     *)
-      echo "Patch: UNKNOWN BUILD / BYTES"
-      echo "Refusing to modify this binary until the patch is re-verified."
+      ui_print "Patch: UNKNOWN BUILD / BYTES"
+      ui_print "Refusing to modify this binary until the patch is re-verified."
       ;;
   esac
 }
@@ -382,10 +406,10 @@ patch_binary() {
 
   case "$action" in
     on)
-      [[ "$state" != "ON" ]] || { echo "Patch is already ON."; return 0; }
+      [[ "$state" != "ON" ]] || { ui_print "Patch is already ON."; return 0; }
       ;;
     off)
-      [[ "$state" != "OFF" ]] || { echo "Patch is already OFF."; return 0; }
+      [[ "$state" != "OFF" ]] || { ui_print "Patch is already OFF."; return 0; }
       ;;
     *) return 1 ;;
   esac
@@ -427,28 +451,28 @@ make_or_refresh_backup() {
     fi
 
     is_clean_signed_app || die "The existing backup belongs to another build, but the current app is not a clean signed installation. Verify Factorio through Steam first."
-    echo "Game build changed; refreshing original executable backup..."
+    ui_print "Game build changed; refreshing original executable backup..."
   else
     is_clean_signed_app || die "Refusing to create an original backup from an ad-hoc or invalidly signed app. Verify Factorio through Steam first."
-    echo "Creating original executable backup..."
+    ui_print "Creating original executable backup..."
   fi
 
   cp -p "$BIN" "$BACKUP"
   backup_sha "$BACKUP" > "$BACKUP_SHA"
   verify_backup
-  echo "Backup: $BACKUP"
+  ui_print "Backup: $BACKUP"
 }
 
 resign() {
-  echo "Re-signing Factorio ad-hoc while preserving signing metadata..."
-  codesign \
+  ui_print "Re-signing Factorio ad-hoc while preserving signing metadata..."
+  run_logged codesign \
     --force \
     --sign - \
     --preserve-metadata=identifier,entitlements,flags \
-    "$APP"
+    "$APP" || return 1
 
-  echo "Verifying signature..."
-  codesign --verify --deep --strict --verbose=2 "$APP"
+  ui_print "Verifying signature..."
+  run_logged codesign --verify --deep --strict --verbose=2 "$APP"
 }
 
 cmd_status() {
@@ -460,42 +484,42 @@ cmd_on() {
   ensure_not_running
   make_or_refresh_backup
 
-  echo "Enabling achievement patch..."
+  ui_print "Enabling achievement patch..."
   if ! patch_binary on; then
-    echo "Patching failed; restoring original executable." >&2
+    ui_error "Patching failed; restoring original executable."
     cp -p "$BACKUP" "$BIN"
-    exit 1
+    return 1
   fi
 
   if ! resign; then
-    echo "Signing failed; restoring original executable." >&2
+    ui_error "Signing failed; restoring original executable."
     cp -p "$BACKUP" "$BIN"
-    exit 1
+    return 1
   fi
 
-  echo
-  echo "Achievement patch: ON"
+  ui_print ""
+  ui_print "Achievement patch: ON"
 }
 
 cmd_off() {
   ensure_not_running
 
-  echo "Disabling achievement patch..."
+  ui_print "Disabling achievement patch..."
   if ! patch_binary off; then
     die "Failed to restore stock instructions."
   fi
 
-  resign
+  resign || die "Signing failed after restoring stock instructions."
 
-  echo
-  echo "Achievement patch: OFF"
+  ui_print ""
+  ui_print "Achievement patch: OFF"
 }
 
 cmd_restore() {
   ensure_not_running
   verify_backup
 
-  echo "Restoring full original executable..."
+  ui_print "Restoring full original executable..."
   cp -p "$BACKUP" "$BIN"
 
   local expected actual
@@ -503,27 +527,40 @@ cmd_restore() {
   actual="$(backup_sha "$BIN")"
   [[ "$actual" == "$expected" ]] || die "Restored executable checksum mismatch."
 
-  echo "Verifying restored app signature..."
-  if codesign --verify --deep --strict --verbose=2 "$APP"; then
-    echo "Original executable restored and signature verifies."
+  ui_print "Verifying restored app signature..."
+  if run_logged codesign --verify --deep --strict --verbose=2 "$APP"; then
+    ui_print "Original executable restored and signature verifies."
   else
-    echo "Original executable restored, but bundle verification failed." >&2
-    echo "Use Steam -> Properties -> Installed Files -> Verify integrity if Factorio does not launch." >&2
-    exit 1
+    ui_error "Original executable restored, but bundle verification failed."
+    ui_error "Use Steam -> Properties -> Installed Files -> Verify integrity if Factorio does not launch."
+    return 1
   fi
 }
 
 main() {
+  local cmd="${1:-status}"
+
+  case "$cmd" in
+    -h|--help|help)
+      usage
+      return 0
+      ;;
+    status|on|off|restore)
+      ;;
+    *)
+      usage >&2
+      return 2
+      ;;
+  esac
+
   require_tools
   require_game
 
-  case "${1:-status}" in
+  case "$cmd" in
     status)  cmd_status ;;
     on)      cmd_on ;;
     off)     cmd_off ;;
     restore) cmd_restore ;;
-    -h|--help|help) usage ;;
-    *) usage >&2; exit 2 ;;
   esac
 }
 
